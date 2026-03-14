@@ -34,47 +34,40 @@ export default function Sidebar({ collapsed, onToggle }) {
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-header">
-        <div className="logo-container">
-          <span style={{ fontSize: '1.4rem' }}>📦</span>
-          {!collapsed && <span className="logo-text">CoreInventory</span>}
-        </div>
+        <span style={{ fontSize: '1.4rem' }}>📦</span>
+        <span className="logo-text">CoreInventory</span>
       </div>
 
-      <nav className="nav-links">
+      <nav className="sidebar-nav">
         {navItems.map(section => (
           <div key={section.section}>
-            <div className="nav-section">{section.section}</div>
+            <div className="nav-section-title">{section.section}</div>
             {section.items.map(item => (
               <NavLink
                 key={item.path}
                 to={item.path}
                 className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-                title={collapsed ? item.label : ''}
               >
                 <span className="nav-icon">{item.icon}</span>
-                {!collapsed && <span className="nav-label">{item.label}</span>}
+                <span className="nav-label">{item.label}</span>
               </NavLink>
             ))}
           </div>
         ))}
 
-        <div className="nav-section" style={{ marginTop: 'auto' }}>Account</div>
-        <div className="nav-item" onClick={handleLogout} style={{ cursor: 'pointer' }} title={collapsed ? 'Logout' : ''}>
+        <div className="nav-section-title" style={{ marginTop: '8px' }}>Account</div>
+        <div className="nav-item" onClick={handleLogout} style={{ cursor: 'pointer' }}>
           <span className="nav-icon">🚪</span>
-          {!collapsed && <span className="nav-label">Logout</span>}
+          <span className="nav-label">Logout</span>
         </div>
       </nav>
 
-      <div className="profile-section">
-        <button className="profile-btn" onClick={() => navigate('/profile')}>
-          <div className="avatar">{initials}</div>
-          {!collapsed && (
-            <div className="profile-info">
-              <div className="profile-name">{user?.name || 'User'}</div>
-              <div className="profile-role">{user?.role || 'Administrator'}</div>
-            </div>
-          )}
-        </button>
+      <div className="sidebar-footer">
+        <div className="user-avatar">{initials}</div>
+        <div className="user-info">
+          <div className="user-name">{user?.name || 'User'}</div>
+          <div className="user-email">{user?.email || ''}</div>
+        </div>
       </div>
     </aside>
   );

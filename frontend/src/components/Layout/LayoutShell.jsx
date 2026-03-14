@@ -8,28 +8,28 @@ export default function LayoutShell() {
   return (
     <div className="layout">
       <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} />
-      <div className="main-wrapper">
-        <header className="topbar">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+      <div className={`main-content ${collapsed ? 'sidebar-collapsed' : ''}`}>
+        <div className="topbar">
+          <div className="topbar-left">
             <button className="toggle-btn" onClick={() => setCollapsed(!collapsed)} title="Toggle sidebar">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>
+                <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
               </svg>
             </button>
-            <div className="search-bar">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <div className="search-box">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                 <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
               </svg>
-              <input type="text" placeholder="Global search..." />
+              <input type="text" placeholder="Search by SKU, product name..." />
             </div>
           </div>
-          <div className="topbar-right" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>v1.0 Standard</span>
+          <div className="topbar-right" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>CoreInventory v1.0</span>
           </div>
-        </header>
-        <main className="main-content">
+        </div>
+        <div className="page-content">
           <Outlet />
-        </main>
+        </div>
       </div>
     </div>
   );
