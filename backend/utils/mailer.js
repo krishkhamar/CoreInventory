@@ -28,7 +28,21 @@ const sendOTPEmail = async (to, otp) => {
             </div>
         `
     };
-    return transporter.sendMail(mailOptions);
+    // For development/debugging: Always log to console
+    console.log('\n-----------------------------------');
+    console.log(`🔑 OTP for ${to}: ${otp}`);
+    console.log('-----------------------------------\n');
+
+    try {
+        if (!process.env.SMTP_USER || process.env.SMTP_USER.includes('your_email')) {
+            console.warn('[MAILER] SMTP User is placeholder. Email sending skipped, use the console code above.');
+            return { messageId: 'dev-mode-console-only' };
+        }
+        return await transporter.sendMail(mailOptions);
+    } catch (err) {
+        console.error('[MAILER ERROR]', err.message);
+        return { error: err.message, fallback: true };
+    }
 };
 
 const generateOTP = () => {

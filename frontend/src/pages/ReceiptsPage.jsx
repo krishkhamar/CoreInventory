@@ -6,21 +6,28 @@ export default function ReceiptsPage() {
   const [receipts, setReceipts] = useState([]);
   const [products, setProducts] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [statusFilter, setStatusFilter] = useState('');
+  const [catFilter, setCatFilter] = useState('');
+  const [searchFilter, setSearchFilter] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [showDetail, setShowDetail] = useState(null);
   const [form, setForm] = useState({ supplier_name: '', scheduled_date: '', items: [{ product_id: '', location_id: '', quantity: '' }] });
   const toast = useToast();
 
   const fetchReceipts = () => {
-    const params = statusFilter ? { status: statusFilter } : {};
+    const params = {};
+    if (statusFilter) params.status = statusFilter;
+    if (catFilter) params.category_id = catFilter;
+    if (searchFilter) params.search = searchFilter;
     api.get('/receipts', { params }).then(r => setReceipts(r.data));
   };
 
-  useEffect(() => { fetchReceipts(); }, [statusFilter]);
+  useEffect(() => { fetchReceipts(); }, [statusFilter, catFilter, searchFilter]);
   useEffect(() => {
     api.get('/products').then(r => setProducts(r.data));
     api.get('/locations').then(r => setLocations(r.data));
+    api.get('/products/categories/all').then(r => setCategories(r.data));
   }, []);
 
   const addItem = () => setForm({ ...form, items: [...form.items, { product_id: '', location_id: '', quantity: '' }] });
@@ -67,6 +74,12 @@ export default function ReceiptsPage() {
       </div>
 
       <div className="filters-bar">
+        <input className="form-control" placeholder="Search by reference or supplier..."
+          style={{ maxWidth: 230 }} value={searchFilter} onChange={e => setSearchFilter(e.target.value)} />
+        <select className="form-control" style={{ maxWidth: 170 }} value={catFilter} onChange={e => setCatFilter(e.target.value)}>
+          <option value="">All Categories</option>
+          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
         {statuses.map(s => (
           <button key={s} className={`filter-chip ${statusFilter === s ? 'active' : ''}`} onClick={() => setStatusFilter(s)}>
             {s || 'All'}
@@ -79,13 +92,14 @@ export default function ReceiptsPage() {
       ) : (
         <div className="data-table-container">
           <table className="data-table">
-            <thead><tr><th>Reference</th><th>Supplier</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Reference</th><th>Supplier</th><th>Date</th><th>Items</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
               {receipts.map(r => (
                 <tr key={r.id}>
                   <td><span style={{ fontWeight: 600, color: 'var(--accent-light)' }}>{r.reference}</span></td>
                   <td>{r.supplier_name || '—'}</td>
                   <td className="text-muted">{r.scheduled_date ? new Date(r.scheduled_date).toLocaleDateString() : '—'}</td>
+                  <td><span className="badge badge-receipt">{r.item_count || 0} items</span></td>
                   <td><span className={`badge badge-${r.status.toLowerCase()}`}>{r.status}</span></td>
                   <td className="action-btns">
                     <button className="btn btn-ghost btn-sm" onClick={() => viewDetail(r.id)}>View</button>

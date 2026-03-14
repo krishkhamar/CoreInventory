@@ -15,10 +15,14 @@ router.post('/receipts', ic.createReceipt);
 router.put('/receipts/:id/validate', ic.validateReceipt);
 router.put('/receipts/:id/cancel', ic.cancelReceipt);
 
-// Deliveries
+// Deliveries (Pick & Pack workflow)
 router.get('/deliveries', ic.getDeliveries);
 router.get('/deliveries/:id', ic.getDelivery);
 router.post('/deliveries', ic.createDelivery);
+router.put('/deliveries/:id/pack', ic.packDelivery);
+router.put('/deliveries/:id/pick', ic.pickDelivery);
+router.put('/deliveries/items/:itemId/pack', ic.packDeliveryItem);
+router.put('/deliveries/items/:itemId/pick', ic.pickDeliveryItem);
 router.put('/deliveries/:id/validate', ic.validateDelivery);
 router.put('/deliveries/:id/cancel', ic.cancelDelivery);
 

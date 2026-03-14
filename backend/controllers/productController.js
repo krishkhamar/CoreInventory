@@ -3,37 +3,57 @@ const pool = require('../config/db');
 // List products with optional filters
 exports.getProducts = async (req, res) => {
     try {
-        const { search, category_id, stock_status } = req.query;
+        const { search, category_id, stock_status, location_id } = req.query;
         let sql = `SELECT p.*, c.name as category_name,
                    COALESCE(SUM(s.quantity), 0) as total_stock
                    FROM products p
-                   LEFT JOIN categories c ON p.category_id = c.id
-                   LEFT JOIN stock s ON p.id = s.product_id`;
+                   LEFT JOIN categories c ON p.category_id = c.id `;
+        
         const params = [];
-        const conditions = [];
+        if (location_id) {
+            sql += ` LEFT JOIN stock s ON p.id = s.product_id AND s.location_id = ?`;
+            params.push(location_id);
+        } else {
+            sql += ` LEFT JOIN stock s ON p.id = s.product_id`;
+        }
+
+        const whereConditions = [];
+        const havingConditions = [];
 
         if (search) {
-            conditions.push('(p.name LIKE ? OR p.sku LIKE ?)');
+            whereConditions.push('(p.name LIKE ? OR p.sku LIKE ?)');
             params.push(`%${search}%`, `%${search}%`);
         }
         if (category_id) {
-            conditions.push('p.category_id = ?');
+            whereConditions.push('p.category_id = ?');
             params.push(category_id);
         }
-        if (conditions.length > 0) {
-            sql += ' WHERE ' + conditions.join(' AND ');
+        
+        if (stock_status === 'out') {
+            havingConditions.push('COALESCE(SUM(s.quantity), 0) = 0');
+        } else if (stock_status === 'low') {
+            havingConditions.push('COALESCE(SUM(s.quantity), 0) > 0 AND COALESCE(SUM(s.quantity), 0) <= p.reorder_point');
+        } else if (stock_status === 'in') {
+            havingConditions.push('COALESCE(SUM(s.quantity), 0) > p.reorder_point');
         }
-        sql += ' GROUP BY p.id ORDER BY p.created_at DESC';
+
+        if (whereConditions.length > 0) {
+            sql += ' WHERE ' + whereConditions.join(' AND ');
+        }
+        
+        sql += ' GROUP BY p.id';
+
+        if (havingConditions.length > 0) {
+            sql += ' HAVING ' + havingConditions.join(' AND ');
+        }
+        
+        sql += ' ORDER BY p.created_at DESC';
 
         const [rows] = await pool.query(sql, params);
 
-        let filtered = rows;
-        if (stock_status === 'low') {
-            filtered = rows.filter(r => r.total_stock > 0 && r.total_stock <= r.reorder_point);
-        } else if (stock_status === 'out') {
-            filtered = rows.filter(r => r.total_stock === 0);
-        }
-        res.json(filtered);
+        // The previous post-query filtering for stock_status is now handled in the SQL query.
+        // So, we can directly return the rows.
+        res.json(rows);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Server error.' });

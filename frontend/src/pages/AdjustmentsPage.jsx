@@ -7,6 +7,8 @@ export default function AdjustmentsPage() {
   const [products, setProducts] = useState([]);
   const [locations, setLocations] = useState([]);
   const [showModal, setShowModal] = useState(false);
+  const [search, setSearch] = useState('');
+  const [filterType, setFilterType] = useState('');
   const [form, setForm] = useState({ product_id: '', location_id: '', new_quantity: '', reason: '' });
   const toast = useToast();
 
@@ -27,6 +29,23 @@ export default function AdjustmentsPage() {
     } catch (err) { toast.error(err.response?.data?.error || 'Failed.'); }
   };
 
+  // Client-side filtering for SKU search and smart filters
+  const filtered = adjustments.filter(a => {
+    const matchesSearch = !search ||
+      a.product_name?.toLowerCase().includes(search.toLowerCase()) ||
+      a.sku?.toLowerCase().includes(search.toLowerCase()) ||
+      a.reference?.toLowerCase().includes(search.toLowerCase()) ||
+      a.location_name?.toLowerCase().includes(search.toLowerCase());
+    
+    const diff = a.new_quantity - a.old_quantity;
+    let matchesType = true;
+    if (filterType === 'increase') matchesType = diff > 0;
+    else if (filterType === 'decrease') matchesType = diff < 0;
+    else if (filterType === 'zero') matchesType = diff === 0;
+
+    return matchesSearch && matchesType;
+  });
+
   return (
     <div className="fade-in">
       <div className="page-header">
@@ -34,19 +53,31 @@ export default function AdjustmentsPage() {
         <button className="btn btn-primary" onClick={() => setShowModal(true)}>+ New Adjustment</button>
       </div>
 
-      {adjustments.length === 0 ? (
-        <div className="empty-state"><div className="empty-icon">⚖️</div><h3>No adjustments</h3></div>
+      <div className="filters-bar">
+        <input className="form-control" placeholder="Search by SKU, product, reference..."
+          style={{ maxWidth: 280 }} value={search} onChange={e => setSearch(e.target.value)} />
+        <button className={`filter-chip ${filterType === '' ? 'active' : ''}`} onClick={() => setFilterType('')}>All</button>
+        <button className={`filter-chip ${filterType === 'increase' ? 'active' : ''}`} onClick={() => setFilterType('increase')}>↑ Increase</button>
+        <button className={`filter-chip ${filterType === 'decrease' ? 'active' : ''}`} onClick={() => setFilterType('decrease')}>↓ Decrease</button>
+        <button className={`filter-chip ${filterType === 'zero' ? 'active' : ''}`} onClick={() => setFilterType('zero')}>= No Change</button>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="empty-state"><div className="empty-icon">⚖️</div><h3>No adjustments found</h3>
+          {search && <p className="text-muted">Try a different search term</p>}
+        </div>
       ) : (
         <div className="data-table-container">
           <table className="data-table">
-            <thead><tr><th>Reference</th><th>Product</th><th>Location</th><th>Old Qty</th><th>New Qty</th><th>Diff</th><th>Reason</th><th>By</th><th>Date</th></tr></thead>
+            <thead><tr><th>Reference</th><th>Product</th><th>SKU</th><th>Location</th><th>Old Qty</th><th>New Qty</th><th>Diff</th><th>Reason</th><th>By</th><th>Date</th></tr></thead>
             <tbody>
-              {adjustments.map(a => {
+              {filtered.map(a => {
                 const diff = a.new_quantity - a.old_quantity;
                 return (
                   <tr key={a.id}>
                     <td><span style={{ fontWeight: 600, color: 'var(--accent-light)' }}>{a.reference}</span></td>
-                    <td>{a.product_name} <code style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{a.sku}</code></td>
+                    <td style={{ fontWeight: 500 }}>{a.product_name}</td>
+                    <td><code style={{ color: 'var(--accent-light)' }}>{a.sku}</code></td>
                     <td>{a.location_name}</td>
                     <td>{a.old_quantity}</td>
                     <td style={{ fontWeight: 600 }}>{a.new_quantity}</td>

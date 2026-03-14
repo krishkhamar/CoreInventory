@@ -3,14 +3,23 @@ const pool = require('../config/db');
 // ==================== RECEIPTS ====================
 exports.getReceipts = async (req, res) => {
     try {
-        const { status } = req.query;
-        let sql = 'SELECT r.*, u.name as created_by FROM receipts r LEFT JOIN users u ON r.user_id = u.id';
+        const { status, category_id, search } = req.query;
+        let sql = `SELECT r.*, u.name as created_by,
+                   (SELECT COUNT(*) FROM receipt_items WHERE receipt_id = r.id) as item_count
+                   FROM receipts r LEFT JOIN users u ON r.user_id = u.id`;
         const params = [];
-        if (status) { sql += ' WHERE r.status = ?'; params.push(status); }
+        const conditions = [];
+        if (status) { conditions.push('r.status = ?'); params.push(status); }
+        if (search) { conditions.push('(r.reference LIKE ? OR r.supplier_name LIKE ?)'); params.push(`%${search}%`, `%${search}%`); }
+        if (category_id) {
+            conditions.push('r.id IN (SELECT DISTINCT ri.receipt_id FROM receipt_items ri JOIN products p ON ri.product_id = p.id WHERE p.category_id = ?)');
+            params.push(category_id);
+        }
+        if (conditions.length > 0) sql += ' WHERE ' + conditions.join(' AND ');
         sql += ' ORDER BY r.created_at DESC';
         const [rows] = await pool.query(sql, params);
         res.json(rows);
-    } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+    } catch (err) { console.error(err); res.status(500).json({ error: 'Server error.' }); }
 };
 
 exports.getReceipt = async (req, res) => {
@@ -85,17 +94,26 @@ exports.cancelReceipt = async (req, res) => {
     } catch (err) { res.status(500).json({ error: 'Server error.' }); }
 };
 
-// ==================== DELIVERY ORDERS ====================
+// ==================== DELIVERY ORDERS (with Pick & Pack) ====================
 exports.getDeliveries = async (req, res) => {
     try {
-        const { status } = req.query;
-        let sql = 'SELECT d.*, u.name as created_by FROM delivery_orders d LEFT JOIN users u ON d.user_id = u.id';
+        const { status, category_id, search } = req.query;
+        let sql = `SELECT d.*, u.name as created_by,
+                   (SELECT COUNT(*) FROM delivery_items WHERE delivery_id = d.id) as item_count
+                   FROM delivery_orders d LEFT JOIN users u ON d.user_id = u.id`;
         const params = [];
-        if (status) { sql += ' WHERE d.status = ?'; params.push(status); }
+        const conditions = [];
+        if (status) { conditions.push('d.status = ?'); params.push(status); }
+        if (search) { conditions.push('(d.reference LIKE ? OR d.customer_name LIKE ?)'); params.push(`%${search}%`, `%${search}%`); }
+        if (category_id) {
+            conditions.push('d.id IN (SELECT DISTINCT di.delivery_id FROM delivery_items di JOIN products p ON di.product_id = p.id WHERE p.category_id = ?)');
+            params.push(category_id);
+        }
+        if (conditions.length > 0) sql += ' WHERE ' + conditions.join(' AND ');
         sql += ' ORDER BY d.created_at DESC';
         const [rows] = await pool.query(sql, params);
         res.json(rows);
-    } catch (err) { res.status(500).json({ error: 'Server error.' }); }
+    } catch (err) { console.error(err); res.status(500).json({ error: 'Server error.' }); }
 };
 
 exports.getDelivery = async (req, res) => {
@@ -124,7 +142,7 @@ exports.createDelivery = async (req, res) => {
         if (items && items.length > 0) {
             for (const item of items) {
                 await pool.query(
-                    'INSERT INTO delivery_items (delivery_id, product_id, location_id, quantity) VALUES (?, ?, ?, ?)',
+                    'INSERT INTO delivery_items (delivery_id, product_id, location_id, quantity, picked, packed) VALUES (?, ?, ?, ?, 0, 0)',
                     [result.insertId, item.product_id, item.location_id, item.quantity]
                 );
             }
@@ -133,12 +151,115 @@ exports.createDelivery = async (req, res) => {
     } catch (err) { console.error(err); res.status(500).json({ error: 'Server error.' }); }
 };
 
+// PACK – warehouse staff boxes items
+exports.packDelivery = async (req, res) => {
+    try {
+        const [deliveries] = await pool.query('SELECT * FROM delivery_orders WHERE id = ? AND status != "Done" AND status != "Canceled"', [req.params.id]);
+        if (deliveries.length === 0) return res.status(400).json({ error: 'Delivery not found or not active.' });
+
+        const [items] = await pool.query('SELECT di.*, p.name as product_name FROM delivery_items di JOIN products p ON di.product_id = p.id WHERE di.delivery_id = ?', [req.params.id]);
+        for (const item of items) {
+            const [stockRows] = await pool.query('SELECT quantity FROM stock WHERE product_id = ? AND location_id = ?', [item.product_id, item.location_id]);
+            if (stockRows.length === 0 || stockRows[0].quantity < item.quantity) {
+                return res.status(400).json({ error: `Insufficient stock for ${item.product_name}. Available: ${stockRows.length > 0 ? stockRows[0].quantity : 0}, Requested: ${item.quantity}` });
+            }
+        }
+
+        await pool.query('UPDATE delivery_items SET packed = 1 WHERE delivery_id = ?', [req.params.id]);
+        
+        const [allItems] = await pool.query('SELECT packed, picked FROM delivery_items WHERE delivery_id = ?', [req.params.id]);
+        const allPicked = allItems.every(i => i.picked);
+        await pool.query('UPDATE delivery_orders SET status = ? WHERE id = ?', [allPicked ? 'Ready' : 'Waiting', req.params.id]);
+        
+        res.json({ message: 'Items packed!' });
+    } catch (err) { console.error(err); res.status(500).json({ error: 'Server error.' }); }
+};
+
+// PICK – items are picked from staging and put in truck
+exports.pickDelivery = async (req, res) => {
+    try {
+        const [deliveries] = await pool.query('SELECT * FROM delivery_orders WHERE id = ? AND status != "Done" AND status != "Canceled"', [req.params.id]);
+        if (deliveries.length === 0) return res.status(400).json({ error: 'Delivery not found or not active.' });
+
+        const [items] = await pool.query('SELECT di.*, p.name as product_name FROM delivery_items di JOIN products p ON di.product_id = p.id WHERE di.delivery_id = ?', [req.params.id]);
+        for (const item of items) {
+            const [stockRows] = await pool.query('SELECT quantity FROM stock WHERE product_id = ? AND location_id = ?', [item.product_id, item.location_id]);
+            if (stockRows.length === 0 || stockRows[0].quantity < item.quantity) {
+                return res.status(400).json({ error: `Insufficient stock for ${item.product_name}. Available: ${stockRows.length > 0 ? stockRows[0].quantity : 0}, Requested: ${item.quantity}` });
+            }
+        }
+
+        await pool.query('UPDATE delivery_items SET picked = 1 WHERE delivery_id = ?', [req.params.id]);
+        
+        const [allItems] = await pool.query('SELECT packed, picked FROM delivery_items WHERE delivery_id = ?', [req.params.id]);
+        const allPacked = allItems.every(i => i.packed);
+        await pool.query('UPDATE delivery_orders SET status = ? WHERE id = ?', [allPacked ? 'Ready' : 'Waiting', req.params.id]);
+        
+        res.json({ message: 'Items picked!' });
+    } catch (err) { console.error(err); res.status(500).json({ error: 'Server error.' }); }
+};
+
+// PACK INDIVIDUAL ITEM
+exports.packDeliveryItem = async (req, res) => {
+    try {
+        const [items] = await pool.query('SELECT di.*, p.name as product_name FROM delivery_items di JOIN products p ON di.product_id = p.id WHERE di.id = ?', [req.params.itemId]);
+        if (items.length === 0) return res.status(404).json({ error: 'Item not found.' });
+        const item = items[0];
+
+        const [stockRows] = await pool.query('SELECT quantity FROM stock WHERE product_id = ? AND location_id = ?', [item.product_id, item.location_id]);
+        if (stockRows.length === 0 || stockRows[0].quantity < item.quantity) {
+            return res.status(400).json({ error: `Insufficient stock for ${item.product_name}.` });
+        }
+
+        await pool.query('UPDATE delivery_items SET packed = 1 WHERE id = ?', [req.params.itemId]);
+
+        const [allItems] = await pool.query('SELECT packed, picked FROM delivery_items WHERE delivery_id = ?', [item.delivery_id]);
+        const allPacked = allItems.every(i => i.packed);
+        const allPicked = allItems.every(i => i.picked);
+        
+        if (allPacked && allPicked) {
+            await pool.query('UPDATE delivery_orders SET status = "Ready" WHERE id = ?', [item.delivery_id]);
+        } else {
+            await pool.query('UPDATE delivery_orders SET status = "Waiting" WHERE id = ? AND status = "Draft"', [item.delivery_id]);
+        }
+        res.json({ message: 'Item packed!' });
+    } catch (err) { console.error(err); res.status(500).json({ error: 'Server error.' }); }
+};
+
+// PICK INDIVIDUAL ITEM
+exports.pickDeliveryItem = async (req, res) => {
+    try {
+        const [items] = await pool.query('SELECT di.*, p.name as product_name FROM delivery_items di JOIN products p ON di.product_id = p.id WHERE di.id = ?', [req.params.itemId]);
+        if (items.length === 0) return res.status(404).json({ error: 'Item not found.' });
+        const item = items[0];
+        
+        const [stockRows] = await pool.query('SELECT quantity FROM stock WHERE product_id = ? AND location_id = ?', [item.product_id, item.location_id]);
+        if (stockRows.length === 0 || stockRows[0].quantity < item.quantity) {
+            return res.status(400).json({ error: `Insufficient stock for ${item.product_name}.` });
+        }
+
+        await pool.query('UPDATE delivery_items SET picked = 1 WHERE id = ?', [req.params.itemId]);
+
+        const [allItems] = await pool.query('SELECT packed, picked FROM delivery_items WHERE delivery_id = ?', [item.delivery_id]);
+        const allPacked = allItems.every(i => i.packed);
+        const allPicked = allItems.every(i => i.picked);
+        
+        if (allPacked && allPicked) {
+            await pool.query('UPDATE delivery_orders SET status = "Ready" WHERE id = ?', [item.delivery_id]);
+        } else {
+            await pool.query('UPDATE delivery_orders SET status = "Waiting" WHERE id = ? AND status = "Draft"', [item.delivery_id]);
+        }
+        res.json({ message: 'Item picked!' });
+    } catch (err) { console.error(err); res.status(500).json({ error: 'Server error.' }); }
+};
+
+// VALIDATE – final step: deduct stock and ship (Ready → Done)
 exports.validateDelivery = async (req, res) => {
     const conn = await pool.getConnection();
     try {
         await conn.beginTransaction();
-        const [deliveries] = await conn.query('SELECT * FROM delivery_orders WHERE id = ? AND status != "Done"', [req.params.id]);
-        if (deliveries.length === 0) return res.status(400).json({ error: 'Delivery not found or already validated.' });
+        const [deliveries] = await conn.query('SELECT * FROM delivery_orders WHERE id = ? AND status = "Ready"', [req.params.id]);
+        if (deliveries.length === 0) return res.status(400).json({ error: 'Delivery not found or not yet picked. Complete Pack → Pick first.' });
 
         const [items] = await conn.query('SELECT * FROM delivery_items WHERE delivery_id = ?', [req.params.id]);
         for (const item of items) {
@@ -157,7 +278,7 @@ exports.validateDelivery = async (req, res) => {
         }
         await conn.query('UPDATE delivery_orders SET status = "Done" WHERE id = ?', [req.params.id]);
         await conn.commit();
-        res.json({ message: 'Delivery validated. Stock updated.' });
+        res.json({ message: 'Delivery validated. Stock shipped!' });
     } catch (err) {
         await conn.rollback();
         console.error(err);
@@ -355,8 +476,9 @@ exports.getDashboard = async (req, res) => {
             `SELECT p.id, p.name, p.reorder_point, COALESCE(SUM(s.quantity), 0) as total_stock
              FROM products p LEFT JOIN stock s ON p.id = s.product_id GROUP BY p.id`
         );
-        const lowStock = stockData.filter(p => p.total_stock > 0 && p.total_stock <= p.reorder_point).length;
-        const outOfStock = stockData.filter(p => p.total_stock === 0).length;
+        const processedStock = stockData.map(p => ({ ...p, total_stock: Number(p.total_stock) }));
+        const lowStock = processedStock.filter(p => p.total_stock > 0 && p.total_stock <= p.reorder_point).length;
+        const outOfStock = processedStock.filter(p => p.total_stock === 0).length;
         const [pendingReceipts] = await pool.query('SELECT COUNT(*) as count FROM receipts WHERE status IN ("Draft","Waiting","Ready")');
         const [pendingDeliveries] = await pool.query('SELECT COUNT(*) as count FROM delivery_orders WHERE status IN ("Draft","Waiting","Ready")');
         const [scheduledTransfers] = await pool.query('SELECT COUNT(*) as count FROM transfers WHERE status IN ("Draft","Waiting","Ready")');
@@ -372,7 +494,7 @@ exports.getDashboard = async (req, res) => {
             pendingReceipts: pendingReceipts[0].count,
             pendingDeliveries: pendingDeliveries[0].count,
             scheduledTransfers: scheduledTransfers[0].count,
-            lowStockItems: stockData.filter(p => p.total_stock > 0 && p.total_stock <= p.reorder_point),
+            lowStockItems: processedStock.filter(p => p.total_stock <= p.reorder_point),
             recentActivity
         });
     } catch (err) {
