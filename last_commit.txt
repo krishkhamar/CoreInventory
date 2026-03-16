@@ -1,0 +1,15 @@
+commit c80c5ba2c6ae5a111c8196cb25e7f76dafbbff4e
+Author: krishkhamar <krishkhamar021104@gmail.com>
+Date:   Mon Mar 16 23:24:07 2026 +0530
+
+    Configure project for unified Render deployment
+
+ backend/server.js            | 10 ++++++++++
+ commit_out.txt               |  5 +++++
+ frontend/src/services/api.js |  2 +-
+ out.txt                      |  9 +++++++++
+ out2.txt                     | 18 ++++++++++++++++++
+ out3.txt                     | 19 +++++++++++++++++++
+ package.json                 | 18 ++++++++++++++++++
+ 7 files changed, 80 insertions(+), 1 deletion(-)
+
